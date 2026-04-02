@@ -1,7 +1,5 @@
 import { useState, useEffect } from "react";
 
-// In production (Vercel) calls go directly to Render backend
-// In dev, Vite proxy forwards /api and /auth to localhost:3001
 const API = import.meta.env.VITE_API_URL || "";
 
 const COURSES = {
@@ -78,7 +76,6 @@ const GLOBAL_CSS = `
   .checkbox-card.checked-gold   { border-color: ${T.gold};   background: ${T.goldDim}; }
 `;
 
-// ─── SHARED ───────────────────────────────────────────────────────────────────
 function Label({ children }) {
   return <div style={{ fontSize: 10, letterSpacing: "0.15em", color: T.muted, textTransform: "uppercase", marginBottom: 8, fontFamily: "'JetBrains Mono', monospace" }}>{children}</div>;
 }
@@ -114,7 +111,6 @@ function TopBar({ user, onLogout }) {
   );
 }
 
-// ─── LOGIN PAGE ───────────────────────────────────────────────────────────────
 function LoginPage() {
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", position: "relative", padding: 24 }}>
@@ -132,7 +128,6 @@ function LoginPage() {
           <h2 style={{ fontSize: 20, fontWeight: 700, color: T.text, fontFamily: "'Syne', sans-serif", marginBottom: 8 }}>Welcome</h2>
           <p style={{ fontSize: 12, color: T.sub, marginBottom: 32, fontFamily: "'JetBrains Mono', monospace" }}>Sign in with your college Gmail account</p>
 
-          {/* Google Sign In Button — must go directly to backend, not Vite proxy */}
           <a href={`${import.meta.env.VITE_API_URL || ""}/auth/google`} style={{ textDecoration: "none" }}>
             <button style={{
               width: "100%", padding: "13px 20px", borderRadius: 8, border: `1px solid ${T.border}`,
@@ -161,9 +156,8 @@ function LoginPage() {
   );
 }
 
-// ─── ONBOARDING ───────────────────────────────────────────────────────────────
 function OnboardingPage({ user, onComplete }) {
-  const [step, setStep] = useState("role"); // role | subjects | courses
+  const [step, setStep] = useState("role"); 
   const [role, setRole] = useState(null);
   const [selected, setSelected] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -249,7 +243,6 @@ function OnboardingPage({ user, onComplete }) {
   );
 }
 
-// ─── TEACHER: SUBJECT PICKER (per session) ────────────────────────────────────
 function TeacherSubjectPicker({ user, onSelect, onAddSubject }) {
   const [selected, setSelected] = useState(null);
   const [adding, setAdding] = useState(false);
@@ -291,7 +284,6 @@ function TeacherSubjectPicker({ user, onSelect, onAddSubject }) {
           );
         })}
 
-        {/* Add subject card */}
         {availableToAdd.length > 0 && (
           <div className="course-card" style={{ border: `1px dashed ${T.border}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", gap: 8 }}
             onClick={() => setAdding(true)}>
@@ -335,7 +327,6 @@ function TeacherSubjectPicker({ user, onSelect, onAddSubject }) {
   );
 }
 
-// ─── ATTENDANCE DATE VIEW ────────────────────────────────────────────────────
 function AttendanceDateView({ attendance, course }) {
   const [openDates, setOpenDates] = useState({});
 
@@ -350,7 +341,6 @@ function AttendanceDateView({ attendance, course }) {
     return d.toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
   };
 
-  // Group records by date (YYYY-MM-DD key)
   const grouped = attendance.reduce((acc, r) => {
     const key = new Date(r.date).toDateString();
     if (!acc[key]) acc[key] = [];
@@ -358,7 +348,6 @@ function AttendanceDateView({ attendance, course }) {
     return acc;
   }, {});
 
-  // Sort dates newest first
   const sortedDates = Object.keys(grouped).sort((a, b) => new Date(b) - new Date(a));
 
   if (attendance.length === 0) return (
@@ -372,12 +361,11 @@ function AttendanceDateView({ attendance, course }) {
       {sortedDates.map((dateKey, i) => {
         const records = grouped[dateKey];
         const presentCount = records.filter(r => r.present).length;
-        const isOpen = openDates[dateKey] !== false; // open by default
+        const isOpen = openDates[dateKey] !== false; 
         const isToday = new Date(dateKey).toDateString() === new Date().toDateString();
 
         return (
           <div key={dateKey} style={{ marginBottom: 12, animation: `fadeUp 0.3s ${i * 0.06}s both` }}>
-            {/* Date header — clickable to collapse */}
             <div onClick={() => toggleDate(dateKey)}
               style={{ background: T.card, border: `1px solid ${isToday ? T.accentBorder : T.border}`, borderRadius: isOpen ? "12px 12px 0 0" : 12, padding: "14px 18px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", transition: "all 0.2s" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -390,7 +378,6 @@ function AttendanceDateView({ attendance, course }) {
                 </div>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-                {/* Present / absent summary pills */}
                 <div style={{ display: "flex", gap: 6 }}>
                   <span style={{ fontSize: 10, padding: "3px 10px", borderRadius: 20, fontWeight: 700, background: T.greenDim, color: T.green, border: `1px solid ${T.green}`, fontFamily: "'JetBrains Mono', monospace" }}>
                     {presentCount} P
@@ -403,7 +390,6 @@ function AttendanceDateView({ attendance, course }) {
               </div>
             </div>
 
-            {/* Expandable records table */}
             {isOpen && (
               <div style={{ background: T.surface, border: `1px solid ${isToday ? T.accentBorder : T.border}`, borderTop: "none", borderRadius: "0 0 12px 12px", overflow: "hidden" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>
@@ -443,7 +429,6 @@ function AttendanceDateView({ attendance, course }) {
   );
 }
 
-// ─── TEACHER: DASHBOARD ───────────────────────────────────────────────────────
 function TeacherDashboard({ user, courseCode, onChangeSubject }) {
   const [activeTab, setActiveTab] = useState("notes");
   const [notes, setNotes] = useState("");
@@ -507,7 +492,6 @@ function TeacherDashboard({ user, courseCode, onChangeSubject }) {
             placeholder={`Describe what you taught today in ${course.name}...`}
             style={{ width: "100%", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontFamily: "'JetBrains Mono', monospace", fontSize: 12, padding: "14px", resize: "vertical", minHeight: 180, outline: "none", lineHeight: 1.8 }}
             onFocus={e => e.target.style.borderColor = T.accent} onBlur={e => e.target.style.borderColor = T.border} />
-          {/* Quantitative hint banner */}
           {notes && /quantitative|numerical|calculation|compute|solve|math|numeric/i.test(notes) && (
             <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 7, background: T.goldDim, border: `1px solid ${T.goldBorder}`, display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 14 }}>🔢</span>
@@ -515,7 +499,6 @@ function TeacherDashboard({ user, courseCode, onChangeSubject }) {
             </div>
           )}
 
-          {/* Quiz settings row */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
             <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: "12px 14px" }}>
               <div style={{ fontSize: 10, color: T.muted, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.12em", marginBottom: 8 }}>MAX ATTEMPTS (per day)</div>
@@ -561,13 +544,11 @@ function TeacherDashboard({ user, courseCode, onChangeSubject }) {
   );
 }
 
-// ─── STUDENT: COURSE SELECTION ────────────────────────────────────────────────
 function CourseSelection({ user, onSelect }) {
   const [notesAvailable, setNotesAvailable] = useState({});
   const [selected, setSelected] = useState(null);
 
   useEffect(() => {
-    // Check which courses have notes available
     Promise.all(user.courses.map(code =>
       fetch(`${API}/api/notes/${code}`, { credentials: "include" })
         .then(r => r.json())
@@ -613,19 +594,17 @@ function CourseSelection({ user, onSelect }) {
   );
 }
 
-// ─── STUDENT: QUIZ ────────────────────────────────────────────────────────
 function QuizView({ user, courseCode, onBack, onComplete }) {
-  const [phase, setPhase] = useState("loading"); // loading | blocked | info | quiz | result
+  const [phase, setPhase] = useState("loading");
   const [questions, setQuestions] = useState([]);
   const [selected, setSelected] = useState({});
   const [score, setScore] = useState(null);
   const [error, setError] = useState("");
-  const [attemptInfo, setAttemptInfo] = useState(null); // { used, max, remaining, timeLimit }
+  const [attemptInfo, setAttemptInfo] = useState(null); 
   const [timeLeft, setTimeLeft] = useState(null);
   const course = COURSES[courseCode];
   const pass = score !== null && score >= 3;
 
-  // Step 1: check attempts on mount
   useEffect(() => {
     fetch(`${API}/api/attempts/${courseCode}`, { credentials: "include" })
       .then(r => r.json())
@@ -637,7 +616,6 @@ function QuizView({ user, courseCode, onBack, onComplete }) {
       .catch(() => { setError("Failed to load quiz info."); setPhase("info"); });
   }, []);
 
-  // Step 2: fetch notes + generate questions when student clicks Start
   const startQuiz = async () => {
     setPhase("loading");
     try {
@@ -651,12 +629,11 @@ function QuizView({ user, courseCode, onBack, onComplete }) {
       const genData = await genRes.json();
       if (genData.error) { setError(genData.error); setPhase("info"); return; }
       setQuestions(genData.questions);
-      setTimeLeft((attemptInfo?.timeLimit || 5) * 60); // convert mins to seconds
+      setTimeLeft((attemptInfo?.timeLimit || 5) * 60); 
       setPhase("quiz");
     } catch { setError("Failed to generate questions."); setPhase("info"); }
   };
 
-  // Countdown timer
   useEffect(() => {
     if (phase !== "quiz" || timeLeft === null) return;
     if (timeLeft <= 0) { handleSubmit(true); return; }
@@ -675,7 +652,6 @@ function QuizView({ user, courseCode, onBack, onComplete }) {
     });
     const data = await res.json();
     if (data.error) setError(data.error);
-    // Update attempt info with response
     if (data.remaining !== undefined) {
       setAttemptInfo(a => ({ ...a, remaining: data.remaining, used: data.attemptsUsed, finalPresent: data.finalPresent, isLastAttempt: data.isLastAttempt }));
     }
@@ -692,14 +668,12 @@ function QuizView({ user, courseCode, onBack, onComplete }) {
 
   return (
     <div style={{ padding: "32px 24px", maxWidth: 680, margin: "0 auto" }}>
-      {/* Header */}
       <div className="fade-up" style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 28 }}>
         <button className="ghost-btn" onClick={onBack} disabled={phase === "quiz"} style={{ opacity: phase === "quiz" ? 0.3 : 1 }}>← BACK</button>
         <div style={{ flex: 1 }}>
           <h2 style={{ fontSize: 18, fontWeight: 800, color: T.text, fontFamily: "'Syne', sans-serif" }}>{course.name}</h2>
           <div style={{ fontSize: 10, color: T.muted, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.1em" }}>{courseCode} · ATTENDANCE QUIZ</div>
-        </div>
-        {/* Live countdown timer during quiz */}
+        </div>/}
         {phase === "quiz" && timeLeft !== null && (
           <div style={{ background: T.card, border: `2px solid ${timerColor}`, borderRadius: 10, padding: "8px 16px", textAlign: "center", minWidth: 80, boxShadow: `0 0 12px ${timerColor}44` }}>
             <div style={{ fontSize: 10, color: T.muted, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.1em", marginBottom: 2 }}>TIME LEFT</div>
@@ -708,7 +682,6 @@ function QuizView({ user, courseCode, onBack, onComplete }) {
         )}
       </div>
 
-      {/* Loading */}
       {phase === "loading" && (
         <div className="fade-up-2" style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 14, padding: "40px 24px", textAlign: "center" }}>
           <div style={{ fontSize: 36, marginBottom: 16 }}>{course.icon}</div>
@@ -718,7 +691,6 @@ function QuizView({ user, courseCode, onBack, onComplete }) {
         </div>
       )}
 
-      {/* Blocked — no attempts left */}
       {phase === "blocked" && (
         <div className="fade-up-2" style={{ background: T.redDim, border: `1px solid ${T.red}`, borderRadius: 14, padding: "36px 24px", textAlign: "center" }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>🚫</div>
@@ -726,7 +698,6 @@ function QuizView({ user, courseCode, onBack, onComplete }) {
           <p style={{ fontSize: 12, color: T.sub, fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.8 }}>
             You have used all <strong style={{ color: T.text }}>{attemptInfo?.max}</strong> attempt{attemptInfo?.max > 1 ? "s" : ""} allowed for this quiz.<br />You have been marked <strong style={{ color: T.red }}>Absent</strong>. Contact your teacher if needed.
           </p>
-          {/* Attempt dots */}
           <div style={{ display: "flex", gap: 6, justifyContent: "center", marginTop: 16 }}>
             {Array.from({ length: attemptInfo?.max || 1 }).map((_, i) => (
               <div key={i} style={{ width: 28, height: 8, borderRadius: 4, background: T.red }} />
@@ -735,7 +706,6 @@ function QuizView({ user, courseCode, onBack, onComplete }) {
         </div>
       )}
 
-      {/* Pre-quiz info screen */}
       {phase === "info" && (
         <div className="fade-up-2" style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 14, padding: "32px 24px" }}>
           <div style={{ textAlign: "center", marginBottom: 24 }}>
@@ -743,7 +713,6 @@ function QuizView({ user, courseCode, onBack, onComplete }) {
             <h3 style={{ fontSize: 16, fontWeight: 700, color: T.text, fontFamily: "'Syne', sans-serif" }}>Ready to take the quiz?</h3>
           </div>
 
-          {/* Info cards */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 24 }}>
             {[
               { label: "Questions", value: "5", color: T.accent, icon: "❓" },
@@ -774,7 +743,6 @@ function QuizView({ user, courseCode, onBack, onComplete }) {
         </div>
       )}
 
-      {/* Quiz questions */}
       {phase === "quiz" && questions.length > 0 && (
         <>
           {questions.map((q, i) => (
@@ -801,7 +769,6 @@ function QuizView({ user, courseCode, onBack, onComplete }) {
         </>
       )}
 
-      {/* Result */}
       {phase === "result" && (
         <div className="fade-up">
           <div style={{ background: pass ? T.greenDim : T.redDim, border: `1px solid ${pass ? T.green : T.red}`, borderRadius: 12, padding: "36px 24px", textAlign: "center", marginBottom: 14 }}>
@@ -811,7 +778,6 @@ function QuizView({ user, courseCode, onBack, onComplete }) {
             </div>
           </div>
 
-          {/* Attempt status card */}
           {!pass && (
             <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 10, padding: "16px 18px" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
@@ -820,7 +786,6 @@ function QuizView({ user, courseCode, onBack, onComplete }) {
                   <span style={{ color: T.accent }}>{attemptInfo?.used}</span> / {attemptInfo?.max} used
                 </span>
               </div>
-              {/* Attempt dots */}
               <div style={{ display: "flex", gap: 6 }}>
                 {Array.from({ length: attemptInfo?.max || 1 }).map((_, i) => (
                   <div key={i} style={{ width: 28, height: 8, borderRadius: 4, background: i < (attemptInfo?.used || 0) ? T.red : T.border, transition: "background 0.3s" }} />
@@ -844,18 +809,15 @@ function QuizView({ user, courseCode, onBack, onComplete }) {
 }
 
 
-// ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [user, setUser]                 = useState(undefined); // undefined = loading
+  const [user, setUser]                 = useState(undefined); 
   const [page, setPage]                 = useState("courses");
   const [activeCourse, setActiveCourse] = useState(null);
 
-  // Check if already logged in on mount
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const authStatus = params.get("auth");
 
-    // Clean URL after OAuth redirect
     if (authStatus) window.history.replaceState({}, "", "/");
 
     fetch(`${API}/auth/me`, { credentials: "include" })
@@ -863,7 +825,6 @@ export default function App() {
       .then(d => {
         setUser(d.user || null);
         if (d.user) {
-          // New user or no role — go to onboarding
           if (!d.user.role || authStatus === "new") {
             setPage("onboarding");
           }
@@ -882,7 +843,6 @@ export default function App() {
     setUser(u => ({ ...u, subjects: [...(u.subjects || []), code] }));
   };
 
-  // Loading
   if (user === undefined) return (
     <>
       <style>{GLOBAL_CSS}</style>
@@ -892,10 +852,8 @@ export default function App() {
     </>
   );
 
-  // Not logged in
   if (!user) return <><style>{GLOBAL_CSS}</style><LoginPage /></>;
 
-  // Onboarding (new user, no role yet)
   if (!user.role || page === "onboarding") return (
     <>
       <style>{GLOBAL_CSS}</style>

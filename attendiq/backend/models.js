@@ -1,32 +1,26 @@
 const mongoose = require("mongoose");
 
-// ─── USER MODEL ───────────────────────────────────────────────────────────────
 const userSchema = new mongoose.Schema({
   googleId:  { type: String, required: true, unique: true },
   name:      { type: String, required: true },
   email:     { type: String, required: true, unique: true },
   avatar:    { type: String },
-  role:      { type: String, enum: ["teacher", "student"], default: null }, // null = not set yet (new user)
-  // Students: list of course codes they're enrolled in
+  role:      { type: String, enum: ["teacher", "student"], default: null }, 
   courses:   [{ type: String }],
-  // Teachers: list of course codes they teach
   subjects:  [{ type: String }],
   createdAt: { type: Date, default: Date.now },
 });
 
-// ─── NOTES MODEL ─────────────────────────────────────────────────────────────
 const notesSchema = new mongoose.Schema({
   teacherId:   { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   courseCode:  { type: String, required: true },
   content:     { type: String, default: "" },
-  maxAttempts: { type: Number, default: 1 },   // how many times student can take the quiz
-  timeLimit:   { type: Number, default: 5 },   // in minutes
+  maxAttempts: { type: Number, default: 1 },
+  timeLimit:   { type: Number, default: 5 }, 
   updatedAt:   { type: Date, default: Date.now },
 });
-// One notes doc per teacher per course
 notesSchema.index({ teacherId: 1, courseCode: 1 }, { unique: true });
 
-// ─── ATTENDANCE MODEL ─────────────────────────────────────────────────────────
 const attendanceSchema = new mongoose.Schema({
   studentId:  { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   teacherId:  { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
@@ -36,16 +30,12 @@ const attendanceSchema = new mongoose.Schema({
   date:       { type: Date, default: Date.now },
 });
 
-// ─── QUIZ ATTEMPT MODEL ───────────────────────────────────────────────────────
-// Tracks lifetime attempts per student per course (not per day)
-// notesVersion ties attempts to a specific quiz set by the teacher
-// If teacher updates notes, notesVersion resets and students get fresh attempts
 const quizAttemptSchema = new mongoose.Schema({
   studentId:    { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
   courseCode:   { type: String, required: true },
-  notesVersion: { type: Date, required: true }, // matches notes.updatedAt so teacher can reset by saving new notes
+  notesVersion: { type: Date, required: true }, 
   attemptsUsed: { type: Number, default: 0 },
-  finalPresent: { type: Boolean, default: false }, // true once student passes
+  finalPresent: { type: Boolean, default: false },
 });
 quizAttemptSchema.index({ studentId: 1, courseCode: 1, notesVersion: 1 }, { unique: true });
 
