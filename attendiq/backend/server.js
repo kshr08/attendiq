@@ -11,10 +11,14 @@ const rateLimit      = require("express-rate-limit");
 const validator      = require("validator");
 require("dotenv").config();
 
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"; // fix for Windows TLS issue
 
 const { User, Notes, Attendance, QuizAttempt } = require("./models");
 
 const app = express();
+
+// ─── HEALTH CHECK — must be FIRST before any middleware so Render can ping it ─
+app.get("/health", (req, res) => res.status(200).json({ status: "ok" }));
 
 // ─── SECURITY HEADERS (helmet) ────────────────────────────────────────────────
 app.use(helmet());
@@ -27,8 +31,8 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: (origin, callback) => {
-    // allow requests with no origin (mobile apps, curl) only in dev
-    if (!origin && process.env.NODE_ENV !== "production") return callback(null, true);
+    // allow requests with no origin (Render health check, curl) 
+    if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
     callback(new Error("Not allowed by CORS"));
   },
@@ -68,10 +72,7 @@ app.use("/api/generate", generateLimiter);
 app.use("/auth/", authLimiter);
 
 // ─── MONGODB ──────────────────────────────────────────────────────────────────
-mongoose.connect(process.env.MONGODB_URI, {
-  serverSelectionTimeoutMS: 5000,
-  connectTimeoutMS: 10000,
-  })
+mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log("✅ MongoDB connected"))
   .catch(err => console.error("❌ MongoDB error:", err));
 
@@ -513,5 +514,4 @@ app.use((err, req, res, next) => {
 
 // ─── START ────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
-app.get("/health", (req, res) => res.status(200).json({ status: "ok" }));
-app.listen(PORT, () => console.log(`🚀 AttendIQ backend running on http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`🚀 AttendIQ backend running on port ${PORT}`));
