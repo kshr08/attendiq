@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 
-const API = ""; // empty = uses Vite proxy to localhost:3001
+// In production (Vercel) calls go directly to Render backend
+// In dev, Vite proxy forwards /api and /auth to localhost:3001
+const API = import.meta.env.VITE_API_URL || "";
 
 const COURSES = {
   CS101: { name: "Data Structures",    icon: "⬡" },
@@ -175,7 +177,7 @@ function OnboardingPage({ user, onComplete }) {
     const body = { role };
     if (role === "teacher") body.subjects = selected;
     if (role === "student") body.courses = selected;
-    const res = await fetch("/api/onboard", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(body) });
+    const res = await fetch(`${API}/api/onboard`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(body) });
     const data = await res.json();
     setLoading(false);
     onComplete(data.user);
@@ -257,7 +259,7 @@ function TeacherSubjectPicker({ user, onSelect, onAddSubject }) {
   const handleAddSubject = async () => {
     if (!newSubject) return;
     setLoading(true);
-    await fetch("/api/teacher/add-subject", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ courseCode: newSubject }) });
+    await fetch(`${API}/api/teacher/add-subject`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify({ courseCode: newSubject }) });
     setLoading(false);
     onAddSubject(newSubject);
     setAdding(false);
@@ -452,7 +454,7 @@ function TeacherDashboard({ user, courseCode, onChangeSubject }) {
   const course = COURSES[courseCode];
 
   useEffect(() => {
-    fetch(`/api/notes/${courseCode}`, { credentials: "include" })
+    fetch(`${API}/api/notes/${courseCode}`, { credentials: "include" })
       .then(r => r.json())
       .then(d => {
         if (d.notes) {
@@ -461,13 +463,13 @@ function TeacherDashboard({ user, courseCode, onChangeSubject }) {
           setTimeLimit(d.notes.timeLimit || 5);
         }
       });
-    fetch(`/api/attendance/${courseCode}`, { credentials: "include" })
+    fetch(`${API}/api/attendance/${courseCode}`, { credentials: "include" })
       .then(r => r.json())
       .then(d => { if (d.records) setAttendance(d.records); });
   }, [courseCode]);
 
   const saveNotes = async () => {
-    await fetch("/api/notes", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
+    await fetch(`${API}/api/notes`, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
       body: JSON.stringify({ courseCode, content: notes, maxAttempts, timeLimit }) });
     setSaved(true); setTimeout(() => setSaved(false), 2000);
   };
@@ -516,7 +518,7 @@ function TeacherDashboard({ user, courseCode, onChangeSubject }) {
           {/* Quiz settings row */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
             <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: "12px 14px" }}>
-              <div style={{ fontSize: 10, color: T.muted, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.12em", marginBottom: 8 }}>MAX ATTEMPTS</div>
+              <div style={{ fontSize: 10, color: T.muted, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.12em", marginBottom: 8 }}>MAX ATTEMPTS (per day)</div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <button onClick={() => setMaxAttempts(a => Math.max(1, a - 1))}
                   style={{ width: 28, height: 28, borderRadius: 6, border: `1px solid ${T.border}`, background: T.card, color: T.text, fontSize: 16, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>−</button>
@@ -567,7 +569,7 @@ function CourseSelection({ user, onSelect }) {
   useEffect(() => {
     // Check which courses have notes available
     Promise.all(user.courses.map(code =>
-      fetch(`/api/notes/${code}`, { credentials: "include" })
+      fetch(`${API}/api/notes/${code}`, { credentials: "include" })
         .then(r => r.json())
         .then(d => ({ code, hasNotes: !!(d.notes?.content) }))
     )).then(results => {
@@ -625,7 +627,7 @@ function QuizView({ user, courseCode, onBack, onComplete }) {
 
   // Step 1: check attempts on mount
   useEffect(() => {
-    fetch(`/api/attempts/${courseCode}`, { credentials: "include" })
+    fetch(`${API}/api/attempts/${courseCode}`, { credentials: "include" })
       .then(r => r.json())
       .then(d => {
         setAttemptInfo(d);
@@ -639,10 +641,10 @@ function QuizView({ user, courseCode, onBack, onComplete }) {
   const startQuiz = async () => {
     setPhase("loading");
     try {
-      const notesRes = await fetch(`/api/notes/${courseCode}`, { credentials: "include" });
+      const notesRes = await fetch(`${API}/api/notes/${courseCode}`, { credentials: "include" });
       const notesData = await notesRes.json();
       if (!notesData.notes?.content) { setError("No notes available."); setPhase("info"); return; }
-      const genRes = await fetch("/api/generate", {
+      const genRes = await fetch(`${API}/api/generate`, {
         method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
         body: JSON.stringify({ courseCode, courseName: course.name, notes: notesData.notes.content }),
       });
@@ -667,7 +669,7 @@ function QuizView({ user, courseCode, onBack, onComplete }) {
     questions.forEach((q, i) => { if (selected[i] === q.answer) correct++; });
     setScore(correct);
     setPhase("result");
-    const res = await fetch("/api/attendance", {
+    const res = await fetch(`${API}/api/attendance`, {
       method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include",
       body: JSON.stringify({ courseCode, score: correct }),
     });
@@ -850,7 +852,7 @@ export default function App() {
 
   // Check if already logged in on mount
   useEffect(() => {
-    fetch("/auth/me", { credentials: "include" })
+    fetch(`${API}/auth/me`, { credentials: "include" })
       .then(r => r.json())
       .then(d => {
         setUser(d.user || null);
@@ -862,7 +864,7 @@ export default function App() {
   }, []);
 
   const handleLogout = async () => {
-    await fetch("/auth/logout", { credentials: "include" });
+    await fetch(`${API}/auth/logout`, { credentials: "include" });
     setUser(null);
     setPage("courses");
   };
