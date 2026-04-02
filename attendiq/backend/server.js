@@ -203,10 +203,8 @@ app.post("/api/onboard", requireAuth, async (req, res) => {
   if (!["teacher", "student"].includes(role)) {
     return res.status(400).json({ error: "Invalid role." });
   }
-  // Prevent re-onboarding if already set
-  if (req.user.role) {
-    return res.status(403).json({ error: "Role already set." });
-  }
+  // Allow re-onboarding only if role is not set
+  // (role gets wiped on fresh deploys for existing users)
   // Validate course codes
   const selected = role === "teacher" ? subjects : courses;
   if (!Array.isArray(selected) || selected.some(c => !VALID_COURSE_CODES.includes(c))) {
