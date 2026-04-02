@@ -4,43 +4,121 @@ const session        = require("express-session");
 const passport       = require("passport");
 const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const mongoose       = require("mongoose");
+const MongoStore     = require("connect-mongo");
+const helmet         = require("helmet");
+const mongoSanitize  = require("express-mongo-sanitize");
+const rateLimit      = require("express-rate-limit");
+const validator      = require("validator");
 require("dotenv").config();
+
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"; // fix for Windows TLS issue
 
 const { User, Notes, Attendance, QuizAttempt } = require("./models");
 
 const app = express();
 
-// ─── MIDDLEWARE ───────────────────────────────────────────────────────────────
-app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
-app.use(express.json());
-app.use(session({
-  secret: process.env.SESSION_SECRET,
-  resave: false,
-  saveUninitialized: false,
-  cookie: { maxAge: 7 * 24 * 60 * 60 * 1000 }, // 7 days
+// ─── SECURITY HEADERS (helmet) ────────────────────────────────────────────────
+app.use(helmet());
+
+// ─── CORS — only allow your frontend ─────────────────────────────────────────
+const allowedOrigins = [
+  process.env.CLIENT_URL,
+  "http://localhost:5173",
+].filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // allow requests with no origin (mobile apps, curl) only in dev
+    if (!origin && process.env.NODE_ENV !== "production") return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error("Not allowed by CORS"));
+  },
+  credentials: true,
 }));
-app.use(passport.initialize());
-app.use(passport.session());
+
+// ─── BODY PARSING + NOSQL INJECTION PREVENTION ───────────────────────────────
+app.use(express.json({ limit: "10kb" })); // cap body size to prevent large payload attacks
+app.use(mongoSanitize()); // strips $ and . from req.body to prevent NoSQL injection
+
+// ─── RATE LIMITING ────────────────────────────────────────────────────────────
+// General API limit
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100,
+  message: { error: "Too many requests, please try again later." },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Strict limit for quiz generation (expensive Groq call)
+const generateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5,
+  message: { error: "Too many quiz generation requests. Please wait a minute." },
+});
+
+// Strict limit for auth routes
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  message: { error: "Too many auth attempts. Please try again later." },
+});
+
+app.use("/api/", apiLimiter);
+app.use("/api/generate", generateLimiter);
+app.use("/auth/", authLimiter);
 
 // ─── MONGODB ──────────────────────────────────────────────────────────────────
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log("✅ MongoDB connected"))
   .catch(err => console.error("❌ MongoDB error:", err));
 
+// ─── SESSIONS — stored in MongoDB, not memory ─────────────────────────────────
+// Memory sessions are lost on server restart and don't work on serverless
+app.use(session({
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  store: MongoStore.create({
+    mongoUrl: process.env.MONGODB_URI,
+    collectionName: "sessions",
+    ttl: 7 * 24 * 60 * 60, // 7 days
+  }),
+  cookie: {
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    httpOnly: true,    // JS can't access cookie — prevents XSS token theft
+    secure: process.env.NODE_ENV === "production", // HTTPS only in prod
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+  },
+}));
+
+app.use(passport.initialize());
+app.use(passport.session());
+
 // ─── PASSPORT GOOGLE STRATEGY ────────────────────────────────────────────────
 passport.use(new GoogleStrategy({
   clientID:     process.env.GOOGLE_CLIENT_ID,
   clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-  callbackURL:  "http://localhost:3001/auth/google/callback",
+  callbackURL:  `${process.env.SERVER_URL}/auth/google/callback`,
+  proxy: true,
 }, async (accessToken, refreshToken, profile, done) => {
   try {
+    const email = profile.emails[0].value;
+
+    // ── EMAIL DOMAIN RESTRICTION ─────────────────────────────────────────────
+    // Only allow emails from your college domain(s)
+    const allowedDomains = (process.env.ALLOWED_EMAIL_DOMAINS || "").split(",").map(d => d.trim());
+    const emailDomain = email.split("@")[1];
+    if (allowedDomains.length > 0 && allowedDomains[0] !== "" && !allowedDomains.includes(emailDomain)) {
+      return done(null, false, { message: `Only ${allowedDomains.join(", ")} email addresses are allowed.` });
+    }
+
     let user = await User.findOne({ googleId: profile.id });
     if (!user) {
-      // New user — create with no role yet, they'll pick it on first login
       user = await User.create({
         googleId: profile.id,
         name:     profile.displayName,
-        email:    profile.emails[0].value,
+        email,
         avatar:   profile.photos[0]?.value,
       });
     }
@@ -60,221 +138,315 @@ passport.deserializeUser(async (id, done) => {
   }
 });
 
-// ─── AUTH MIDDLEWARE ──────────────────────────────────────────────────────────
+// ─── MIDDLEWARE: AUTH CHECK ───────────────────────────────────────────────────
 const requireAuth = (req, res, next) => {
   if (req.isAuthenticated()) return next();
   res.status(401).json({ error: "Not authenticated" });
 };
 
-// ─── AUTH ROUTES ──────────────────────────────────────────────────────────────
+// ─── MIDDLEWARE: ROLE CHECK ───────────────────────────────────────────────────
+const requireRole = (role) => (req, res, next) => {
+  if (!req.isAuthenticated()) return res.status(401).json({ error: "Not authenticated" });
+  if (req.user.role !== role) return res.status(403).json({ error: "Access denied" });
+  next();
+};
 
-// Start Google login
+// ─── MIDDLEWARE: INPUT VALIDATION ─────────────────────────────────────────────
+const VALID_COURSE_CODES = ["CS101", "CS203", "CS305", "CS401", "CS502"];
+
+const validateCourseCode = (req, res, next) => {
+  const code = req.params.courseCode || req.body.courseCode;
+  if (!code || !VALID_COURSE_CODES.includes(code)) {
+    return res.status(400).json({ error: "Invalid course code." });
+  }
+  next();
+};
+
+// ─── AUTH ROUTES ──────────────────────────────────────────────────────────────
 app.get("/auth/google",
   passport.authenticate("google", { scope: ["profile", "email"] })
 );
 
-// Google callback
 app.get("/auth/google/callback",
-  passport.authenticate("google", { failureRedirect: `${process.env.CLIENT_URL}/login?error=true` }),
+  passport.authenticate("google", {
+    failureRedirect: `${process.env.CLIENT_URL}/login?error=unauthorized`,
+    failureMessage: false,
+  }),
   (req, res) => {
-    // If new user (no role set), send to onboarding
-    if (!req.user.role) {
-      return res.redirect(`${process.env.CLIENT_URL}/onboarding`);
-    }
+    if (!req.user.role) return res.redirect(`${process.env.CLIENT_URL}/onboarding`);
     res.redirect(process.env.CLIENT_URL);
   }
 );
 
-// Get current logged-in user
 app.get("/auth/me", (req, res) => {
   if (!req.user) return res.json({ user: null });
-  res.json({ user: req.user });
+  // Only send what the frontend needs — never send sensitive fields
+  const { _id, name, email, avatar, role, courses, subjects } = req.user;
+  res.json({ user: { _id, name, email, avatar, role, courses, subjects } });
 });
 
-// Logout
 app.get("/auth/logout", (req, res) => {
-  req.logout(() => res.json({ success: true }));
+  req.logout(() => {
+    req.session.destroy();
+    res.json({ success: true });
+  });
 });
 
-// ─── ONBOARDING ROUTES ────────────────────────────────────────────────────────
-
-// Set role + initial subjects/courses after first login
+// ─── ONBOARDING ───────────────────────────────────────────────────────────────
 app.post("/api/onboard", requireAuth, async (req, res) => {
   const { role, subjects, courses } = req.body;
+
+  // Validate role
+  if (!["teacher", "student"].includes(role)) {
+    return res.status(400).json({ error: "Invalid role." });
+  }
+  // Prevent re-onboarding if already set
+  if (req.user.role) {
+    return res.status(403).json({ error: "Role already set." });
+  }
+  // Validate course codes
+  const selected = role === "teacher" ? subjects : courses;
+  if (!Array.isArray(selected) || selected.some(c => !VALID_COURSE_CODES.includes(c))) {
+    return res.status(400).json({ error: "Invalid course selection." });
+  }
+
   try {
     const update = { role };
-    if (role === "teacher") update.subjects = subjects;
-    if (role === "student") update.courses = courses;
+    if (role === "teacher") update.subjects = selected;
+    if (role === "student") update.courses = selected;
     const user = await User.findByIdAndUpdate(req.user._id, update, { new: true });
-    res.json({ user });
+    const { _id, name, email, avatar, role: r, courses: c, subjects: s } = user;
+    res.json({ user: { _id, name, email, avatar, role: r, courses: c, subjects: s } });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Server error." });
   }
 });
 
-// Teacher: add a new subject
-app.post("/api/teacher/add-subject", requireAuth, async (req, res) => {
+// Teacher: add a new subject (teachers only)
+app.post("/api/teacher/add-subject", requireRole("teacher"), async (req, res) => {
   const { courseCode } = req.body;
+  if (!VALID_COURSE_CODES.includes(courseCode)) {
+    return res.status(400).json({ error: "Invalid course code." });
+  }
   try {
     const user = await User.findByIdAndUpdate(
       req.user._id,
-      { $addToSet: { subjects: courseCode } }, // addToSet prevents duplicates
+      { $addToSet: { subjects: courseCode } },
       { new: true }
     );
-    res.json({ user });
+    const { _id, name, email, avatar, role, courses, subjects } = user;
+    res.json({ user: { _id, name, email, avatar, role, courses, subjects } });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Server error." });
   }
 });
 
 // ─── NOTES ROUTES ─────────────────────────────────────────────────────────────
 
-// Save/update notes for a course
-app.post("/api/notes", requireAuth, async (req, res) => {
+// Save notes — teachers only, only for their own subjects
+app.post("/api/notes", requireRole("teacher"), async (req, res) => {
   const { courseCode, content, maxAttempts, timeLimit } = req.body;
+
+  // Teacher can only save notes for subjects they teach
+  if (!req.user.subjects.includes(courseCode)) {
+    return res.status(403).json({ error: "You do not teach this subject." });
+  }
+  if (!VALID_COURSE_CODES.includes(courseCode)) {
+    return res.status(400).json({ error: "Invalid course code." });
+  }
+  // Sanitize content length
+  if (typeof content !== "string" || content.length > 5000) {
+    return res.status(400).json({ error: "Notes too long (max 5000 characters)." });
+  }
+  // Clamp attempts and time
+  const safeAttempts = Math.min(Math.max(parseInt(maxAttempts) || 1, 1), 5);
+  const safeTime     = Math.min(Math.max(parseInt(timeLimit) || 5, 1), 30);
+
   try {
     const notes = await Notes.findOneAndUpdate(
       { teacherId: req.user._id, courseCode },
-      { content, maxAttempts: maxAttempts || 1, timeLimit: timeLimit || 5, updatedAt: new Date() },
+      { content, maxAttempts: safeAttempts, timeLimit: safeTime, updatedAt: new Date() },
       { upsert: true, new: true }
     );
     res.json({ notes });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Server error." });
   }
 });
 
-// Get notes for a course (used by student to generate quiz)
-app.get("/api/notes/:courseCode", requireAuth, async (req, res) => {
+// Get notes — student must be enrolled in the course
+app.get("/api/notes/:courseCode", requireAuth, validateCourseCode, async (req, res) => {
+  const { courseCode } = req.params;
+
+  // Students: verify they're enrolled
+  if (req.user.role === "student" && !req.user.courses.includes(courseCode)) {
+    return res.status(403).json({ error: "You are not enrolled in this course." });
+  }
+
   try {
-    // Find the teacher who teaches this course
-    const teacher = await User.findOne({ role: "teacher", subjects: req.params.courseCode });
+    const teacher = await User.findOne({ role: "teacher", subjects: courseCode });
     if (!teacher) return res.json({ notes: null });
-    const notes = await Notes.findOne({ teacherId: teacher._id, courseCode: req.params.courseCode });
+    const notes = await Notes.findOne({ teacherId: teacher._id, courseCode });
     res.json({ notes });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Server error." });
   }
 });
 
-// ─── ATTENDANCE ROUTES ────────────────────────────────────────────────────────
+// ─── ATTEMPT CHECK ────────────────────────────────────────────────────────────
+app.get("/api/attempts/:courseCode", requireRole("student"), validateCourseCode, async (req, res) => {
+  const { courseCode } = req.params;
 
-// Save attendance after quiz — uses lifetime attempt tracking
-app.post("/api/attendance", requireAuth, async (req, res) => {
-  const { courseCode, score } = req.body;
+  // Verify student is enrolled
+  if (!req.user.courses.includes(courseCode)) {
+    return res.status(403).json({ error: "You are not enrolled in this course." });
+  }
+
   try {
     const teacher = await User.findOne({ role: "teacher", subjects: courseCode });
     const notes = await Notes.findOne({ teacherId: teacher?._id, courseCode });
-    const maxAttempts = notes?.maxAttempts || 1;
-    const notesVersion = notes?.updatedAt;
+    if (!notes) return res.json({ used: 0, max: 1, remaining: 1, timeLimit: 5, finalPresent: false });
 
-    // Get or create attempt record
-    let attempt = await QuizAttempt.findOne({
-      studentId: req.user._id, courseCode, notesVersion,
+    const notesVersion = notes.updatedAt;
+    const attempt = await QuizAttempt.findOne({ studentId: req.user._id, courseCode, notesVersion });
+
+    const used = attempt?.attemptsUsed || 0;
+    const max  = notes.maxAttempts || 1;
+
+    res.json({
+      used,
+      max,
+      timeLimit:    notes.timeLimit || 5,
+      remaining:    Math.max(0, max - used),
+      finalPresent: attempt?.finalPresent || false,
     });
+  } catch (err) {
+    res.status(500).json({ error: "Server error." });
+  }
+});
 
+// ─── ATTENDANCE ───────────────────────────────────────────────────────────────
+
+// Submit attendance — students only
+app.post("/api/attendance", requireRole("student"), async (req, res) => {
+  const { courseCode, score } = req.body;
+
+  // Validate inputs
+  if (!VALID_COURSE_CODES.includes(courseCode)) {
+    return res.status(400).json({ error: "Invalid course code." });
+  }
+  if (!req.user.courses.includes(courseCode)) {
+    return res.status(403).json({ error: "You are not enrolled in this course." });
+  }
+  // Score must be 0–5
+  const safeScore = parseInt(score);
+  if (isNaN(safeScore) || safeScore < 0 || safeScore > 5) {
+    return res.status(400).json({ error: "Invalid score." });
+  }
+
+  try {
+    const teacher = await User.findOne({ role: "teacher", subjects: courseCode });
+    const notes   = await Notes.findOne({ teacherId: teacher?._id, courseCode });
+    const maxAttempts   = notes?.maxAttempts || 1;
+    const notesVersion  = notes?.updatedAt;
+
+    let attempt = await QuizAttempt.findOne({ studentId: req.user._id, courseCode, notesVersion });
     if (!attempt) {
       attempt = await QuizAttempt.create({
         studentId: req.user._id, courseCode, notesVersion, attemptsUsed: 0, finalPresent: false,
       });
     }
 
-    // Block if attempts exhausted
     if (attempt.attemptsUsed >= maxAttempts) {
       return res.status(403).json({ error: "All attempts used up." });
     }
 
-    const present = score >= 3;
+    const present       = safeScore >= 3;
     const isLastAttempt = attempt.attemptsUsed + 1 >= maxAttempts;
 
-    // Increment attempts used; mark present if passed
     await QuizAttempt.findByIdAndUpdate(attempt._id, {
       $inc: { attemptsUsed: 1 },
-      finalPresent: present || attempt.finalPresent, // once present, stays present
+      finalPresent: present || attempt.finalPresent,
     });
 
-    // Save attendance record
-    const record = await Attendance.create({
+    await Attendance.create({
       studentId: req.user._id,
       teacherId: teacher?._id,
-      courseCode, score,
-      // Mark present if passed, or mark absent if this was the last attempt and still failed
-      present: present || (!present && isLastAttempt ? false : undefined) || present,
+      courseCode,
+      score: safeScore,
+      present,
     });
 
     res.json({
-      record,
-      attemptsUsed: attempt.attemptsUsed + 1,
+      attemptsUsed:  attempt.attemptsUsed + 1,
       maxAttempts,
-      remaining: Math.max(0, maxAttempts - (attempt.attemptsUsed + 1)),
-      finalPresent: present || attempt.finalPresent,
+      remaining:     Math.max(0, maxAttempts - (attempt.attemptsUsed + 1)),
+      finalPresent:  present || attempt.finalPresent,
       isLastAttempt,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Server error." });
   }
 });
 
-// Check lifetime attempts for a student for a course
-app.get("/api/attempts/:courseCode", requireAuth, async (req, res) => {
-  try {
-    const teacher = await User.findOne({ role: "teacher", subjects: req.params.courseCode });
-    const notes = await Notes.findOne({ teacherId: teacher?._id, courseCode: req.params.courseCode });
-    if (!notes) return res.json({ used: 0, max: 1, remaining: 1, timeLimit: 5, finalPresent: false });
+// Get attendance — teachers only, only for their own courses
+app.get("/api/attendance/:courseCode", requireRole("teacher"), validateCourseCode, async (req, res) => {
+  const { courseCode } = req.params;
 
-    const maxAttempts = notes.maxAttempts || 1;
-    const notesVersion = notes.updatedAt;
-
-    // Find or create attempt record for this student + this version of notes
-    let attempt = await QuizAttempt.findOne({
-      studentId: req.user._id,
-      courseCode: req.params.courseCode,
-      notesVersion,
-    });
-
-    const used = attempt?.attemptsUsed || 0;
-    const finalPresent = attempt?.finalPresent || false;
-
-    res.json({
-      used,
-      max: maxAttempts,
-      timeLimit: notes.timeLimit || 5,
-      remaining: Math.max(0, maxAttempts - used),
-      finalPresent,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  if (!req.user.subjects.includes(courseCode)) {
+    return res.status(403).json({ error: "You do not teach this subject." });
   }
-});
 
-// Get attendance for a course (teacher view) — all dates, sorted newest first
-app.get("/api/attendance/:courseCode", requireAuth, async (req, res) => {
   try {
-    const records = await Attendance.find({ courseCode: req.params.courseCode, teacherId: req.user._id })
-      .populate("studentId", "name email avatar")
-      .sort({ date: -1 }); // newest first — frontend groups by date
+    const records = await Attendance.find({ courseCode, teacherId: req.user._id })
+      .populate("studentId", "name email avatar") // only expose needed fields
+      .sort({ date: -1 });
     res.json({ records });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Server error." });
   }
 });
 
-// ─── QUIZ GENERATION ──────────────────────────────────────────────────────────
-app.post("/api/generate", requireAuth, async (req, res) => {
-  const { courseCode, courseName, notes } = req.body;
-  const user = req.user;
+// ─── QUIZ GENERATION — students only, must be enrolled ───────────────────────
+app.post("/api/generate", requireRole("student"), generateLimiter, async (req, res) => {
+  const { courseCode, courseName } = req.body;
 
-  // Detect if teacher has requested quantitative questions
+  // Validate course code and enrollment
+  if (!VALID_COURSE_CODES.includes(courseCode)) {
+    return res.status(400).json({ error: "Invalid course code." });
+  }
+  if (!req.user.courses.includes(courseCode)) {
+    return res.status(403).json({ error: "You are not enrolled in this course." });
+  }
+
+  // Fetch notes from DB directly — don't trust notes sent from frontend
+  const teacher = await User.findOne({ role: "teacher", subjects: courseCode });
+  const notesDoc = await Notes.findOne({ teacherId: teacher?._id, courseCode });
+  if (!notesDoc?.content) {
+    return res.status(404).json({ error: "No notes found for this course." });
+  }
+
+  // Check attempt limit before generating (prevent generating if blocked)
+  const attempt = await QuizAttempt.findOne({
+    studentId: req.user._id, courseCode, notesVersion: notesDoc.updatedAt,
+  });
+  if (attempt && attempt.attemptsUsed >= notesDoc.maxAttempts) {
+    return res.status(403).json({ error: "All attempts used up." });
+  }
+
+  const notes = notesDoc.content;
+  const user  = req.user;
+
   const wantsQuantitative = /quantitative|numerical|calculation|compute|solve|math|numeric/i.test(notes);
 
   const questionTypeInstruction = wantsQuantitative
     ? `Mix question types:
-- At least 2 quantitative/numerical questions that require calculation or solving (based on any numbers, formulas, or problems in the notes)
+- At least 2 quantitative/numerical questions that require calculation or solving
 - The remaining questions can be theoretical/conceptual
 - For quantitative questions, include actual numbers in both the question and options`
-    : `Focus on theoretical and conceptual questions only — definitions, explanations, comparisons, and understanding of concepts. Do NOT include calculation-based questions unless the notes explicitly ask for them.`;
+    : `Focus on theoretical and conceptual questions only. Do NOT include calculation-based questions.`;
 
-  const prompt = `Generate exactly 5 unique multiple choice questions for a student named "${user.name}" (ID: ${user._id}) for the subject "${courseName}" (${courseCode}).
+  const prompt = `Generate exactly 5 unique multiple choice questions for a student named "${validator.escape(user.name)}" for the subject "${validator.escape(courseName)}" (${courseCode}).
 
 Use these teacher's class notes:
 ${notes}
@@ -309,14 +481,32 @@ No markdown, no backticks, no explanation.`;
     });
 
     const data = await response.json();
-    if (data.error) return res.status(500).json({ error: data.error.message });
+    if (data.error) return res.status(500).json({ error: "AI generation failed." });
 
     const raw = data.choices[0].message.content;
     const questions = JSON.parse(raw.replace(/```json|```/g, "").trim());
+
+    // Validate the shape of questions before sending to client
+    if (!Array.isArray(questions) || questions.length !== 5) {
+      return res.status(500).json({ error: "Invalid quiz format received from AI." });
+    }
+    for (const q of questions) {
+      if (!q.question || !Array.isArray(q.options) || q.options.length !== 4 || typeof q.answer !== "number") {
+        return res.status(500).json({ error: "Malformed question from AI." });
+      }
+    }
+
     res.json({ questions });
   } catch (err) {
     res.status(500).json({ error: "Failed to generate questions." });
   }
+});
+
+// ─── GLOBAL ERROR HANDLER ─────────────────────────────────────────────────────
+app.use((err, req, res, next) => {
+  // Don't leak error details in production
+  console.error(err);
+  res.status(500).json({ error: process.env.NODE_ENV === "production" ? "Something went wrong." : err.message });
 });
 
 // ─── START ────────────────────────────────────────────────────────────────────
