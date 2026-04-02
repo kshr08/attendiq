@@ -132,8 +132,8 @@ function LoginPage() {
           <h2 style={{ fontSize: 20, fontWeight: 700, color: T.text, fontFamily: "'Syne', sans-serif", marginBottom: 8 }}>Welcome</h2>
           <p style={{ fontSize: 12, color: T.sub, marginBottom: 32, fontFamily: "'JetBrains Mono', monospace" }}>Sign in with your college Gmail account</p>
 
-          {/* Google Sign In Button */}
-          <a href="/auth/google" style={{ textDecoration: "none" }}>
+          {/* Google Sign In Button — must go directly to backend, not Vite proxy */}
+          <a href={`${import.meta.env.VITE_API_URL || ""}/auth/google`} style={{ textDecoration: "none" }}>
             <button style={{
               width: "100%", padding: "13px 20px", borderRadius: 8, border: `1px solid ${T.border}`,
               background: T.card, color: T.text, fontFamily: "'Syne', sans-serif",
@@ -864,7 +864,7 @@ export default function App() {
   }, []);
 
   const handleLogout = async () => {
-    await fetch(`${API}/auth/logout`, { credentials: "include" });
+    await fetch(`${import.meta.env.VITE_API_URL || ""}/auth/logout`, { credentials: "include" });
     setUser(null);
     setPage("courses");
   };
