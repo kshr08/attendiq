@@ -511,4 +511,5 @@ app.use((err, req, res, next) => {
 
 // ─── START ────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
+app.get("/health", (req, res) => res.status(200).json({ status: "ok" }));
 app.listen(PORT, () => console.log(`🚀 AttendIQ backend running on http://localhost:${PORT}`));
