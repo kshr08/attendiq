@@ -673,7 +673,7 @@ function QuizView({ user, courseCode, onBack, onComplete }) {
         <div style={{ flex: 1 }}>
           <h2 style={{ fontSize: 18, fontWeight: 800, color: T.text, fontFamily: "'Syne', sans-serif" }}>{course.name}</h2>
           <div style={{ fontSize: 10, color: T.muted, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.1em" }}>{courseCode} · ATTENDANCE QUIZ</div>
-        </div>/}
+        </div>
         {phase === "quiz" && timeLeft !== null && (
           <div style={{ background: T.card, border: `2px solid ${timerColor}`, borderRadius: 10, padding: "8px 16px", textAlign: "center", minWidth: 80, boxShadow: `0 0 12px ${timerColor}44` }}>
             <div style={{ fontSize: 10, color: T.muted, fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.1em", marginBottom: 2 }}>TIME LEFT</div>
