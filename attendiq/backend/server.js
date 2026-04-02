@@ -17,6 +17,9 @@ const { User, Notes, Attendance, QuizAttempt } = require("./models");
 
 const app = express();
 
+// ─── TRUST PROXY — required for secure cookies behind Render's proxy ──────────
+app.set("trust proxy", 1);
+
 // ─── HEALTH CHECK — must be FIRST before any middleware so Render can ping it ─
 app.get("/health", (req, res) => res.status(200).json({ status: "ok" }));
 
@@ -172,12 +175,15 @@ app.get("/auth/google",
 
 app.get("/auth/google/callback",
   passport.authenticate("google", {
-    failureRedirect: `${process.env.CLIENT_URL}/login?error=unauthorized`,
+    failureRedirect: `${process.env.CLIENT_URL}?error=unauthorized`,
     failureMessage: false,
   }),
   (req, res) => {
-    if (!req.user.role) return res.redirect(`${process.env.CLIENT_URL}/onboarding`);
-    res.redirect(process.env.CLIENT_URL);
+    // Redirect to frontend with auth=success so frontend re-checks /auth/me
+    if (!req.user.role) {
+      return res.redirect(`${process.env.CLIENT_URL}?auth=new`);
+    }
+    res.redirect(`${process.env.CLIENT_URL}?auth=success`);
   }
 );
 

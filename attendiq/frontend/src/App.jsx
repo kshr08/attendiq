@@ -852,15 +852,24 @@ export default function App() {
 
   // Check if already logged in on mount
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const authStatus = params.get("auth");
+
+    // Clean URL after OAuth redirect
+    if (authStatus) window.history.replaceState({}, "", "/");
+
     fetch(`${API}/auth/me`, { credentials: "include" })
       .then(r => r.json())
       .then(d => {
         setUser(d.user || null);
-        // Check if we're on the onboarding redirect
-        if (window.location.pathname === "/onboarding" && d.user) {
-          setPage("onboarding");
+        if (d.user) {
+          // New user or no role — go to onboarding
+          if (!d.user.role || authStatus === "new") {
+            setPage("onboarding");
+          }
         }
-      });
+      })
+      .catch(() => setUser(null));
   }, []);
 
   const handleLogout = async () => {
