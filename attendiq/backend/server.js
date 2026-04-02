@@ -11,7 +11,6 @@ const rateLimit      = require("express-rate-limit");
 const validator      = require("validator");
 require("dotenv").config();
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"; // fix for Windows TLS issue
 
 const { User, Notes, Attendance, QuizAttempt } = require("./models");
 
@@ -69,7 +68,10 @@ app.use("/api/generate", generateLimiter);
 app.use("/auth/", authLimiter);
 
 // ─── MONGODB ──────────────────────────────────────────────────────────────────
-mongoose.connect(process.env.MONGODB_URI)
+mongoose.connect(process.env.MONGODB_URI, {
+  serverSelectionTimeoutMS: 5000,
+  connectTimeoutMS: 10000,
+  })
   .then(() => console.log("✅ MongoDB connected"))
   .catch(err => console.error("❌ MongoDB error:", err));
 
