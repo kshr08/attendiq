@@ -4,7 +4,7 @@
 
 AttendIQ replaces manual roll-calls with a self-serve flow: a teacher posts class notes, and each student proves they were paying attention by clearing a short AI-generated quiz built *from those exact notes*. Attendance is only marked present when the quiz is passed.
 
-🔗 **Live app:** frontend on Vercel · backend on Render ([`/health`](.) check endpoint wired up for uptime monitoring)
+🔗 **Live app:** frontend on Vercel(http://attendiq-delta.vercel.app/) · backend on Render ([`/health`](.) check endpoint wired up for uptime monitoring)
 
 ---
 
