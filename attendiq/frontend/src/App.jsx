@@ -68,6 +68,7 @@ const GLOBAL_CSS = `
   .ghost-btn:hover { border-color: ${T.borderHover}; color: ${T.text}; }
   .checkbox-card {
     background: ${T.card}; border: 1px solid ${T.border};
+    
     border-radius: 10px; padding: 14px 16px; cursor: pointer;
     transition: all 0.2s; display: flex; align-items: center; gap: 12px;
   }
