@@ -428,8 +428,8 @@ No markdown, no backticks, no explanation.`;
         "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "llama-3.1-8b-instant",
-        max_tokens: 700,
+        model: "openai/gpt-oss-20b",
+        max_tokens: 3000,
         temperature: 0.7,
         messages: [
           { role: "system", content: "You are a quiz generator. Always respond with raw JSON only — no markdown, no backticks, no explanation." },
