@@ -46,7 +46,7 @@ AttendIQ replaces manual roll-calls with a self-serve flow: a teacher posts clas
 | Backend | Node.js, Express |
 | Database | MongoDB Atlas (Mongoose ODM) |
 | Auth | Passport.js, Google OAuth 2.0, `express-session` + `connect-mongo` |
-| AI | Groq API (`llama-3.1-8b-instant`) for dynamic quiz generation |
+| AI | Groq API (`openai/gpt-oss-20b`) for dynamic quiz generation |
 | Security | Helmet, express-mongo-sanitize, express-rate-limit, validator |
 | Hosting | Vercel (frontend), Render (backend) + UptimeRobot |
 
